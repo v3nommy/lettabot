@@ -35,23 +35,25 @@ export async function getBillingTier(apiKey?: string): Promise<string | null> {
       return null;
     }
     
-    if (!key) return 'free';
+    if (!key) {
+      return 'free';
+    }
     
     const response = await fetch(`${baseUrl}/v1/metadata/balance`, {
-      headers: { 'Authorization': `Bearer ${key}` },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${key}`,
+      },
     });
     
     if (!response.ok) {
-      console.error(`[BillingTier] API returned ${response.status}`);
       return 'free';
     }
     
     const data = await response.json() as { billing_tier?: string };
     const tier = data.billing_tier?.toLowerCase() ?? 'free';
-    console.log(`[BillingTier] Got tier: ${tier}`);
     return tier;
-  } catch (err) {
-    console.error(`[BillingTier] Error:`, err);
+  } catch {
     return 'free';
   }
 }

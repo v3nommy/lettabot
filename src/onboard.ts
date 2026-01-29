@@ -373,8 +373,14 @@ async function stepModel(config: OnboardConfig, env: Record<string, string>): Pr
   if (!isSelfHosted) {
     spinner.start('Checking account...');
     // Pass the API key explicitly since it may not be in process.env yet
+    // Priority: manually entered key > env object > process.env
     const apiKey = config.apiKey || env.LETTA_API_KEY || process.env.LETTA_API_KEY;
+    console.log(`[Debug] config.apiKey: ${config.apiKey?.slice(0, 20)}...`);
+    console.log(`[Debug] env.LETTA_API_KEY: ${env.LETTA_API_KEY?.slice(0, 20)}...`);
+    console.log(`[Debug] process.env.LETTA_API_KEY: ${process.env.LETTA_API_KEY?.slice(0, 20)}...`);
+    console.log(`[Debug] Using apiKey: ${apiKey?.slice(0, 20)}...`);
     billingTier = await getBillingTier(apiKey);
+    console.log(`[Debug] billingTier result: "${billingTier}"`);
     config.billingTier = billingTier ?? undefined;
     spinner.stop(billingTier === 'free' ? 'Free plan' : `Plan: ${billingTier || 'unknown'}`);
   }
