@@ -119,13 +119,11 @@ import { PollingService } from './polling/service.js';
 import { agentExists } from './tools/letta-api.js';
 import { installSkillsToWorkingDir } from './skills/loader.js';
 
-// Check if setup is needed
-const ENV_PATH = resolve(process.cwd(), '.env');
-if (!existsSync(ENV_PATH)) {
-  console.log('\n  No .env file found. Running setup wizard...\n');
-  const setupPath = new URL('./setup.ts', import.meta.url).pathname;
-  spawn('npx', ['tsx', setupPath], { stdio: 'inherit', cwd: process.cwd() });
-  process.exit(0);
+// Check if config exists
+const configPath = resolveConfigPath();
+if (!existsSync(configPath)) {
+  console.log(`\n  No config found at ${configPath}. Run "lettabot onboard" first.\n`);
+  process.exit(1);
 }
 
 // Parse heartbeat target (format: "telegram:123456789" or "slack:C1234567890")
