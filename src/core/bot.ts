@@ -181,13 +181,11 @@ export class LettaBot {
     try {
       if (this.store.agentId) {
         process.env.LETTA_AGENT_ID = this.store.agentId;
-        console.log(`[Bot] Resuming session for agent ${this.store.agentId}`);
-        console.log(`[Bot] LETTA_BASE_URL=${process.env.LETTA_BASE_URL}`);
-        console.log(`[Bot] LETTA_API_KEY=${process.env.LETTA_API_KEY ? '(set)' : '(not set)'}`);
+
         // Don't pass model when resuming - agent already has its model configured
         session = resumeSession(this.store.agentId, baseOptions);
       } else {
-        console.log('[Bot] Creating new session');
+
         // Only pass model when creating a new agent
         session = createSession({ ...baseOptions, model: this.config.model, memory: loadMemoryBlocks(this.config.agentName) });
       }
@@ -207,14 +205,7 @@ export class LettaBot {
         }
       };
 
-      // Log diagnostic info for debugging connection issues
-      console.log('[Bot] Initializing session...');
-      console.log('[Bot] API key set:', !!process.env.LETTA_API_KEY);
-      console.log('[Bot] Base URL:', process.env.LETTA_BASE_URL || 'https://api.letta.com (default)');
-      console.log('[Bot] Node version:', process.version);
-
       const initInfo = await withTimeout(session.initialize(), 'Session initialize');
-      console.log('[Bot] Session initialized, agent:', initInfo.agentId);
 
       // Send message to agent with metadata envelope
       const formattedMessage = formatMessageEnvelope(msg);
@@ -230,6 +221,7 @@ export class LettaBot {
       let lastUpdate = Date.now();
       let messageId: string | null = null;
       let lastMsgType: string | null = null;
+      let lastAssistantUuid: string | null = null;
       let sentAnyMessage = false;
       
       // Helper to finalize and send current accumulated response
@@ -242,6 +234,8 @@ export class LettaBot {
               await adapter.sendMessage({ chatId: msg.chatId, text: response, threadId: msg.threadId });
             }
             sentAnyMessage = true;
+            const preview = response.length > 50 ? response.slice(0, 50) + '...' : response;
+            console.log(`[Bot] Sent: "${preview}"`);
           } catch {
             // Ignore send errors
           }
@@ -259,14 +253,34 @@ export class LettaBot {
       
       try {
         for await (const streamMsg of session.stream()) {
+          const msgUuid = (streamMsg as any).uuid;
+          
           // When message type changes, finalize the current message
           // This ensures different message types appear as separate bubbles
           if (lastMsgType && lastMsgType !== streamMsg.type && response.trim()) {
             await finalizeMessage();
           }
+          
+          // Log meaningful events
+          if (streamMsg.type !== lastMsgType) {
+            if (streamMsg.type === 'tool_call') {
+              const toolName = (streamMsg as any).toolName || 'unknown';
+              console.log(`[Bot] Calling tool: ${toolName}`);
+            } else if (streamMsg.type === 'tool_result') {
+              console.log(`[Bot] Tool completed`);
+            } else if (streamMsg.type === 'assistant' && lastMsgType !== 'assistant') {
+              console.log(`[Bot] Generating response...`);
+            }
+          }
           lastMsgType = streamMsg.type;
           
           if (streamMsg.type === 'assistant') {
+            // Check if this is a new assistant message (different UUID)
+            if (msgUuid && lastAssistantUuid && msgUuid !== lastAssistantUuid && response.trim()) {
+              await finalizeMessage();
+            }
+            lastAssistantUuid = msgUuid || lastAssistantUuid;
+            
             response += streamMsg.content;
             
             // Stream updates only for channels that support editing (Telegram, Slack)
@@ -319,6 +333,8 @@ export class LettaBot {
             await adapter.sendMessage({ chatId: msg.chatId, text: response, threadId: msg.threadId });
           }
           sentAnyMessage = true;
+          const preview = response.length > 50 ? response.slice(0, 50) + '...' : response;
+          console.log(`[Bot] Sent: "${preview}"`);
         } catch (sendError) {
           console.error('[Bot] Error sending response:', sendError);
           if (!messageId) {
