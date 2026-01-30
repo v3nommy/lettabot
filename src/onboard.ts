@@ -37,7 +37,9 @@ interface OnboardConfig {
   whatsapp: { enabled: boolean; selfChat?: boolean; dmPolicy?: 'pairing' | 'allowlist' | 'open'; allowedUsers?: string[] };
   signal: { enabled: boolean; phone?: string; selfChat?: boolean; dmPolicy?: 'pairing' | 'allowlist' | 'open'; allowedUsers?: string[] };
   discord: { enabled: boolean; token?: string; dmPolicy?: 'pairing' | 'allowlist' | 'open'; allowedUsers?: string[] };
-  gmail: { enabled: boolean; account?: string };
+  
+  // Google Workspace (via gog CLI)
+  google: { enabled: boolean; account?: string; services?: string[] };
   
   // Features
   heartbeat: { enabled: boolean; interval?: string };
@@ -855,6 +857,230 @@ async function stepFeatures(config: OnboardConfig): Promise<void> {
 }
 
 // ============================================================================
+// Google Workspace Setup (via gog CLI)
+// ============================================================================
+
+const GOG_SERVICES = ['gmail', 'calendar', 'drive', 'contacts', 'docs', 'sheets'];
+
+async function stepGoogle(config: OnboardConfig): Promise<void> {
+  // Ask if user wants to set up Google
+  const setupGoogle = await p.confirm({
+    message: 'Set up Google Workspace? (Gmail, Calendar, Drive, etc.)',
+    initialValue: config.google.enabled,
+  });
+  if (p.isCancel(setupGoogle)) { p.cancel('Setup cancelled'); process.exit(0); }
+  
+  if (!setupGoogle) {
+    config.google.enabled = false;
+    return;
+  }
+  
+  // Check if gog is installed
+  const gogInstalled = spawnSync('which', ['gog'], { stdio: 'pipe' }).status === 0;
+  
+  if (!gogInstalled) {
+    p.log.warning('gog CLI is not installed.');
+    
+    // Check if brew is available (macOS)
+    const brewInstalled = spawnSync('which', ['brew'], { stdio: 'pipe' }).status === 0;
+    
+    if (brewInstalled) {
+      const installGog = await p.confirm({
+        message: 'Install gog via Homebrew?',
+        initialValue: true,
+      });
+      if (p.isCancel(installGog)) { p.cancel('Setup cancelled'); process.exit(0); }
+      
+      if (installGog) {
+        const spinner = p.spinner();
+        spinner.start('Installing gog...');
+        
+        const result = spawnSync('brew', ['install', 'steipete/tap/gogcli'], { 
+          stdio: 'pipe',
+          timeout: 300000, // 5 min timeout
+        });
+        
+        if (result.status === 0) {
+          spinner.stop('gog installed successfully');
+        } else {
+          spinner.stop('Failed to install gog');
+          p.log.error('Installation failed. Try manually: brew install steipete/tap/gogcli');
+          config.google.enabled = false;
+          return;
+        }
+      } else {
+        p.log.info('Install gog manually: brew install steipete/tap/gogcli');
+        config.google.enabled = false;
+        return;
+      }
+    } else {
+      p.log.info('Install gog manually from: https://gogcli.sh');
+      config.google.enabled = false;
+      return;
+    }
+  }
+  
+  // Check for existing credentials
+  const credentialsResult = spawnSync('gog', ['auth', 'list'], { stdio: 'pipe' });
+  const hasCredentials = credentialsResult.status === 0 && 
+    credentialsResult.stdout.toString().trim().length > 0 &&
+    !credentialsResult.stdout.toString().includes('No accounts');
+  
+  if (!hasCredentials) {
+    // Check if credentials.json exists
+    const configDir = process.env.XDG_CONFIG_HOME || `${process.env.HOME}/.config`;
+    const credPaths = [
+      `${configDir}/gogcli/credentials.json`,
+      `${process.env.HOME}/Library/Application Support/gogcli/credentials.json`,
+    ];
+    
+    const hasCredFile = credPaths.some(p => existsSync(p));
+    
+    if (!hasCredFile) {
+      p.note(
+        'To use Google Workspace, you need OAuth credentials:\n\n' +
+        '1. Go to console.cloud.google.com\n' +
+        '2. Create a project (or select existing)\n' +
+        '3. Enable APIs: Gmail, Calendar, Drive, etc.\n' +
+        '4. Create OAuth 2.0 credentials (Desktop app)\n' +
+        '5. Download the JSON file\n' +
+        '6. Run: gog auth credentials /path/to/credentials.json',
+        'Google OAuth Setup'
+      );
+      
+      const hasCredentials = await p.confirm({
+        message: 'Have you already set up OAuth credentials with gog?',
+        initialValue: false,
+      });
+      if (p.isCancel(hasCredentials)) { p.cancel('Setup cancelled'); process.exit(0); }
+      
+      if (!hasCredentials) {
+        p.log.info('Run `gog auth credentials /path/to/client_secret.json` after downloading credentials.');
+        config.google.enabled = false;
+        return;
+      }
+    }
+  }
+  
+  // List existing accounts or add new one
+  let accounts: string[] = [];
+  if (hasCredentials) {
+    const listResult = spawnSync('gog', ['auth', 'list', '--json'], { stdio: 'pipe' });
+    if (listResult.status === 0) {
+      try {
+        const parsed = JSON.parse(listResult.stdout.toString());
+        if (Array.isArray(parsed)) {
+          accounts = parsed.map((a: { email?: string; account?: string }) => a.email || a.account || '').filter(Boolean);
+        }
+      } catch {
+        // Parse as text output
+        accounts = listResult.stdout.toString()
+          .split('\n')
+          .map(line => line.trim())
+          .filter(line => line.includes('@'));
+      }
+    }
+  }
+  
+  let selectedAccount: string | undefined;
+  
+  if (accounts.length > 0) {
+    const accountChoice = await p.select({
+      message: 'Google account',
+      options: [
+        ...accounts.map(a => ({ value: a, label: a, hint: 'Existing account' })),
+        { value: '__new__', label: 'Add new account', hint: 'Authorize another account' },
+      ],
+      initialValue: config.google.account || accounts[0],
+    });
+    if (p.isCancel(accountChoice)) { p.cancel('Setup cancelled'); process.exit(0); }
+    
+    if (accountChoice === '__new__') {
+      selectedAccount = await addGoogleAccount();
+    } else {
+      selectedAccount = accountChoice as string;
+    }
+  } else {
+    selectedAccount = await addGoogleAccount();
+  }
+  
+  if (!selectedAccount) {
+    config.google.enabled = false;
+    return;
+  }
+  
+  // Select services
+  const selectedServices = await p.multiselect({
+    message: 'Which Google services do you want to enable?',
+    options: GOG_SERVICES.map(s => ({
+      value: s,
+      label: s.charAt(0).toUpperCase() + s.slice(1),
+      hint: s === 'gmail' ? 'Read/send emails' : 
+            s === 'calendar' ? 'View/create events' :
+            s === 'drive' ? 'Access files' :
+            s === 'contacts' ? 'Look up contacts' :
+            s === 'docs' ? 'Read documents' :
+            'Read/edit spreadsheets',
+    })),
+    initialValues: config.google.services || ['gmail', 'calendar'],
+    required: true,
+  });
+  if (p.isCancel(selectedServices)) { p.cancel('Setup cancelled'); process.exit(0); }
+  
+  config.google.enabled = true;
+  config.google.account = selectedAccount;
+  config.google.services = selectedServices as string[];
+  
+  p.log.success(`Google Workspace configured: ${selectedAccount}`);
+}
+
+async function addGoogleAccount(): Promise<string | undefined> {
+  const email = await p.text({
+    message: 'Google account email',
+    placeholder: 'you@gmail.com',
+  });
+  if (p.isCancel(email) || !email) return undefined;
+  
+  const services = await p.multiselect({
+    message: 'Services to authorize',
+    options: GOG_SERVICES.map(s => ({
+      value: s,
+      label: s.charAt(0).toUpperCase() + s.slice(1),
+    })),
+    initialValues: ['gmail', 'calendar', 'drive', 'contacts'],
+    required: true,
+  });
+  if (p.isCancel(services)) return undefined;
+  
+  p.note(
+    'A browser window will open for Google authorization.\n' +
+    'Sign in with your Google account and grant permissions.',
+    'Authorization'
+  );
+  
+  const spinner = p.spinner();
+  spinner.start('Authorizing...');
+  
+  // Run gog auth add (this will open browser)
+  const result = spawnSync('gog', [
+    'auth', 'add', email,
+    '--services', (services as string[]).join(','),
+  ], { 
+    stdio: 'inherit', // Let it interact with terminal for browser auth
+    timeout: 300000, // 5 min timeout
+  });
+  
+  if (result.status === 0) {
+    spinner.stop('Account authorized');
+    return email;
+  } else {
+    spinner.stop('Authorization failed');
+    p.log.error('Failed to authorize account. Try manually: gog auth add ' + email);
+    return undefined;
+  }
+}
+
+// ============================================================================
 // Summary & Review
 // ============================================================================
 
@@ -899,6 +1125,11 @@ function showSummary(config: OnboardConfig): void {
   if (config.cron) features.push('Cron');
   lines.push(`Features:  ${features.length > 0 ? features.join(', ') : 'None'}`);
   
+  // Google
+  if (config.google.enabled) {
+    lines.push(`Google:    ${config.google.account} (${config.google.services?.join(', ') || 'all'})`);
+  }
+  
   p.note(lines.join('\n'), 'Configuration');
 }
 
@@ -916,6 +1147,7 @@ async function reviewLoop(config: OnboardConfig, env: Record<string, string>): P
         { value: 'agent', label: 'Change agent', hint: '' },
         { value: 'channels', label: 'Change channels', hint: '' },
         { value: 'features', label: 'Change features', hint: '' },
+        { value: 'google', label: 'Change Google Workspace', hint: '' },
       ],
     });
     if (p.isCancel(choice)) { p.cancel('Setup cancelled'); process.exit(0); }
@@ -933,6 +1165,7 @@ async function reviewLoop(config: OnboardConfig, env: Record<string, string>): P
     }
     else if (choice === 'channels') await stepChannels(config, env);
     else if (choice === 'features') await stepFeatures(config);
+    else if (choice === 'google') await stepGoogle(config);
   }
 }
 
@@ -1017,7 +1250,11 @@ export async function onboard(): Promise<void> {
       selfChat: existingConfig.channels.signal?.selfChat,
       dmPolicy: existingConfig.channels.signal?.dmPolicy,
     },
-    gmail: { enabled: false },
+    google: {
+      enabled: existingConfig.integrations?.google?.enabled || false,
+      account: existingConfig.integrations?.google?.account,
+      services: existingConfig.integrations?.google?.services,
+    },
     heartbeat: { 
       enabled: existingConfig.features?.heartbeat?.enabled || false,
       interval: existingConfig.features?.heartbeat?.intervalMin?.toString(),
@@ -1049,6 +1286,7 @@ export async function onboard(): Promise<void> {
   await stepModel(config, env);
   await stepChannels(config, env);
   await stepFeatures(config);
+  await stepGoogle(config);
   
   // Review loop
   await reviewLoop(config, env);
@@ -1166,6 +1404,9 @@ export async function onboard(): Promise<void> {
     config.whatsapp.enabled ? `  ✓ WhatsApp (${formatAccess(config.whatsapp.dmPolicy, config.whatsapp.allowedUsers)})` : '  ✗ WhatsApp',
     config.signal.enabled ? `  ✓ Signal (${formatAccess(config.signal.dmPolicy, config.signal.allowedUsers)})` : '  ✗ Signal',
     '',
+    'Integrations:',
+    config.google.enabled ? `  ✓ Google (${config.google.account} - ${config.google.services?.join(', ') || 'all'})` : '  ✗ Google Workspace',
+    '',
     'Features:',
     config.heartbeat.enabled ? `  ✓ Heartbeat (${config.heartbeat.interval}min)` : '  ✗ Heartbeat',
     config.cron ? '  ✓ Cron jobs' : '  ✗ Cron jobs',
@@ -1235,6 +1476,15 @@ export async function onboard(): Promise<void> {
         intervalMin: config.heartbeat.interval ? parseInt(config.heartbeat.interval) : undefined,
       },
     },
+    ...(config.google.enabled ? {
+      integrations: {
+        google: {
+          enabled: true,
+          account: config.google.account,
+          services: config.google.services,
+        },
+      },
+    } : {}),
   };
   
   // Add BYOK providers if configured

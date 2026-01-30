@@ -152,6 +152,11 @@ export function configToEnv(config: LettaBotConfig): Record<string, string> {
     env.HEARTBEAT_INTERVAL_MIN = String(config.features.heartbeat.intervalMin || 30);
   }
   
+  // Integrations - Google (Gmail polling)
+  if (config.integrations?.google?.enabled && config.integrations.google.account) {
+    env.GMAIL_ACCOUNT = config.integrations.google.account;
+  }
+  
   return env;
 }
 

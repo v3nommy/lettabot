@@ -44,6 +44,11 @@ export interface LettaBotConfig {
       intervalMin?: number;
     };
   };
+
+  // Integrations (Google Workspace, etc.)
+  integrations?: {
+    google?: GoogleConfig;
+  };
 }
 
 export interface ProviderConfig {
@@ -87,6 +92,12 @@ export interface DiscordConfig {
   token?: string;
   dmPolicy?: 'pairing' | 'allowlist' | 'open';
   allowedUsers?: string[];
+}
+
+export interface GoogleConfig {
+  enabled: boolean;
+  account?: string;
+  services?: string[];  // e.g., ['gmail', 'calendar', 'drive', 'contacts', 'docs', 'sheets']
 }
 
 // Default config
