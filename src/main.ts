@@ -161,7 +161,7 @@ const config = {
     sessionPath: process.env.WHATSAPP_SESSION_PATH || './data/whatsapp-session',
     dmPolicy: (process.env.WHATSAPP_DM_POLICY || 'pairing') as 'pairing' | 'allowlist' | 'open',
     allowedUsers: process.env.WHATSAPP_ALLOWED_USERS?.split(',').filter(Boolean) || [],
-    selfChatMode: process.env.WHATSAPP_SELF_CHAT_MODE !== 'false', // Default true
+    selfChatMode: process.env.WHATSAPP_SELF_CHAT_MODE !== 'false', // Default true (safe - only self-chat)
   },
   signal: {
     enabled: !!process.env.SIGNAL_PHONE_NUMBER,

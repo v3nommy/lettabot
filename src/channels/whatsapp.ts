@@ -266,6 +266,12 @@ Ask the bot owner to approve with:
         
         // Check access control (for DMs only, groups are open, self-chat always allowed)
         if (!isGroup && !isSelfChat) {
+          // CRITICAL: If selfChatMode is enabled, ONLY respond to self-chat messages
+          // Silently ignore all non-self messages to prevent bot from messaging other people
+          if (this.config.selfChatMode) {
+            continue;
+          }
+          
           const access = await this.checkAccess(userId, pushName);
           
           if (access === 'blocked') {
