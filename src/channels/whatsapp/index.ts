@@ -76,6 +76,13 @@ import { parseCommand, HELP_TEXT } from "../../core/commands.js";
 import { rmSync } from "node:fs";
 
 // ============================================================================
+// DEBUG MODE
+// ============================================================================
+
+/** Enable verbose debug logging with DEBUG_WHATSAPP=1 */
+const DEBUG_WA = process.env.DEBUG_WHATSAPP === '1';
+
+// ============================================================================
 // CONSTANTS
 // ============================================================================
 
@@ -575,8 +582,10 @@ export class WhatsAppAdapter implements ChannelAdapter {
 
     // Only process "notify" (new message) and "append" (history)
     if (type !== "notify" && type !== "append") {
+      if (DEBUG_WA) console.log(`[WhatsApp:Debug] Skipped batch: type=${type} (not notify/append)`);
       return;
     }
+    if (DEBUG_WA) console.log(`[WhatsApp:Debug] Processing ${messages.length} message(s), type=${type}`);
 
     for (const m of messages) {
       const messageId = m.key.id || "";
@@ -584,11 +593,13 @@ export class WhatsAppAdapter implements ChannelAdapter {
 
       // Filter out status updates and broadcast messages
       if (isStatusOrBroadcast(remoteJid)) {
+        if (DEBUG_WA) console.log(`[WhatsApp:Debug] Skipped status/broadcast: ${remoteJid}`);
         continue;
       }
 
       // Skip messages we sent (prevents loop in selfChatMode)
       if (this.sentMessageIds.has(messageId)) {
+        if (DEBUG_WA) console.log(`[WhatsApp:Debug] Skipped own sent message: ${messageId}`);
         this.sentMessageIds.delete(messageId);
         continue;
       }
@@ -604,6 +615,10 @@ export class WhatsAppAdapter implements ChannelAdapter {
         this.config.selfChatMode || false
       );
 
+      if (DEBUG_WA) {
+        console.log(`[WhatsApp:Debug] Message: remoteJid=${remoteJid}, fromMe=${m.key.fromMe}, isSelfChat=${isSelfChat}, selfChatMode=${this.config.selfChatMode}, myJid=${this.myJid}, myNumber=${this.myNumber}`);
+      }
+
       // Track self-chat LID for reply conversion
       if (isSelfChat && isLid(remoteJid)) {
         this.selfChatLid = remoteJid;
@@ -612,6 +627,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
       // Skip own messages (unless selfChatMode enabled for self-chat)
       if (m.key.fromMe) {
         if (!(this.config.selfChatMode && isSelfChat)) {
+          if (DEBUG_WA) console.log(`[WhatsApp:Debug] DROPPED: fromMe=true but not (selfChatMode && isSelfChat)`);
           continue;
         }
       }
@@ -642,12 +658,14 @@ export class WhatsAppAdapter implements ChannelAdapter {
       } catch (err) {
         // Extraction threw error (e.g., Bad MAC during session renegotiation)
         // Skip without marking as seen → WhatsApp will retry after session fix
+        if (DEBUG_WA) console.log(`[WhatsApp:Debug] DROPPED: extraction threw error:`, err);
         continue;
       }
 
       if (!extracted) {
         // Extraction returned null (no text, invalid format, or decryption failure)
         // Skip without marking as seen → allows retry on next attempt
+        if (DEBUG_WA) console.log(`[WhatsApp:Debug] DROPPED: extraction returned null (no text/media)`);
         continue;
       }
 
@@ -655,6 +673,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
       // Why: If we dedupe first, failed messages get marked as "seen" and are lost forever
       // With this order: Failed messages can retry after WhatsApp renegotiates the session
       if (this.dedupeCache.check(dedupeKey)) {
+        if (DEBUG_WA) console.log(`[WhatsApp:Debug] DROPPED: duplicate message ${dedupeKey}`);
         continue; // Duplicate message - skip
       }
 
@@ -665,6 +684,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
       // CRITICAL: Skip messages older than connection time (prevents duplicate responses on reconnect)
       const messageTimestampMs = extracted.timestamp.getTime();
       if (messageTimestampMs < this.connectedAtMs) {
+        if (DEBUG_WA) console.log(`[WhatsApp:Debug] DROPPED: old message (msgTime=${messageTimestampMs}, connectedAt=${this.connectedAtMs}, diff=${messageTimestampMs - this.connectedAtMs}ms)`);
         // This is an old message from before we connected - mark as read but don't auto-reply
         if (messageId && !isExtractedSelfChat && this.sock) {
           await sendReadReceipt(this.sock, remoteJid, messageId, m.key?.participant);
@@ -672,10 +692,13 @@ export class WhatsAppAdapter implements ChannelAdapter {
         continue;
       }
 
+      if (DEBUG_WA) console.log(`[WhatsApp:Debug] Post-extraction: from=${from}, chatId=${chatId}, isGroup=${isGroup}, isExtractedSelfChat=${isExtractedSelfChat}, body="${body.slice(0, 50)}"`);
+
       // Check access control for DMs only (groups are open, self-chat always allowed)
       if (!isGroup && !isExtractedSelfChat) {
         // If selfChatMode is enabled, ONLY respond to self-chat messages
         if (this.config.selfChatMode) {
+          if (DEBUG_WA) console.log(`[WhatsApp:Debug] DROPPED: selfChatMode=true but isExtractedSelfChat=false (from=${from}, selfE164=${extracted.selfE164})`);
           continue; // Silently ignore all non-self messages
         }
 
