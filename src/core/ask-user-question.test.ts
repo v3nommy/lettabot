@@ -154,10 +154,9 @@ describe('AskUserQuestion message interceptor', () => {
     });
 
     // Simulate handleMessage with empty text
-    if (pendingQuestionResolver) {
-      pendingQuestionResolver('');
-      pendingQuestionResolver = null;
-    }
+    // Non-null assertion needed: TS can't track the synchronous mutation from the Promise callback
+    pendingQuestionResolver!('');
+    pendingQuestionResolver = null;
 
     const answer = await answerPromise;
     expect(answer).toBe('');
