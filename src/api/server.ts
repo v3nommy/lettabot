@@ -11,6 +11,7 @@ import { listPairingRequests, approvePairingCode } from '../pairing/store.js';
 import { parseMultipart } from './multipart.js';
 import type { AgentRouter } from '../core/interfaces.js';
 import type { ChannelId } from '../core/types.js';
+import { handleFileExplorer } from './fileExplorer.js';
 
 const VALID_CHANNELS: ChannelId[] = ['telegram', 'slack', 'discord', 'whatsapp', 'signal'];
 const MAX_BODY_SIZE = 10 * 1024; // 10KB
@@ -302,6 +303,14 @@ export function createApiServer(deliverer: AgentRouter, options: ServerOptions):
       }
       return;
     }
+
+        // Route: /admin/files/* (feature-flagged file explorer)
+        if (process.env.FILE_EXPLORER_ENABLED === 'true' && req.url?.startsWith('/admin/files')) {
+         const handled = await handleFileExplorer(req, res);
+         if (handled) return;
+      // if not handled, fall through to existing routing (including 404)
+    }
+
 
     // Route: 404 Not Found
     sendError(res, 404, 'Not found');
