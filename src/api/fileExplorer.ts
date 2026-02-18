@@ -162,6 +162,21 @@ function buildUiHtml(): string {
     .tree-icon { font-size: 0.9rem; }
     .loading { opacity: 0.6; pointer-events: none; }
     .error { background: #7f1d1d; color: #fecaca; padding: 1rem; border-radius: 6px; margin-bottom: 1rem; }
+
+    /* --- Mobile sidebar toggle (added) --- */
+    @media (max-width: 768px) {
+      .sidebar {
+        position: fixed;
+        left: -280px;
+        top: 0;
+        height: 100%;
+        z-index: 2000;
+        transition: left 0.25s ease;
+      }
+      .sidebar.open { left: 0; }
+      .main { width: 100%; }
+      .container { flex-direction: column; }
+    }
   </style>
 </head>
 <body>
@@ -175,6 +190,9 @@ function buildUiHtml(): string {
 
     <main class="main">
       <header class="header">
+        <!-- Mobile sidebar toggle button (added) -->
+        <button onclick="toggleSidebar()" class="btn btn-secondary" aria-label="Toggle navigation">☰</button>
+
         <div class="breadcrumb" id="breadcrumb">${escapeHtml(DATA_ROOT)}</div>
       </header>
 
@@ -197,6 +215,12 @@ function buildUiHtml(): string {
 
   <script>
     let currentPath = '';
+
+    /* Mobile sidebar toggle (added) */
+    function toggleSidebar() {
+      const sidebar = document.querySelector('.sidebar');
+      if (sidebar) sidebar.classList.toggle('open');
+    }
 
     function showError(msg) {
       document.getElementById('errorContainer').innerHTML = '<div class="error">' + msg + '</div>';
