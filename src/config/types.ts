@@ -542,6 +542,34 @@ export function normalizeAgents(config: LettaBotConfig): AgentConfig[] {
       allowedUsers: parseList(process.env.DISCORD_ALLOWED_USERS),
     };
   }
+  const featuresFromEnv = (() => {
+    const heartbeatEnabled = process.env.HEARTBEAT_ENABLED === 'true';
+    const cronEnabled = process.env.CRON_ENABLED === 'true';
+
+    const hbInterval = process.env.HEARTBEAT_INTERVAL_MIN
+      ? parseInt(process.env.HEARTBEAT_INTERVAL_MIN, 10)
+      : undefined;
+
+    const hbSkip = process.env.HEARTBEAT_SKIP_RECENT_USER_MIN
+      ? parseInt(process.env.HEARTBEAT_SKIP_RECENT_USER_MIN, 10)
+      : undefined;
+
+    const features: any = {};
+
+    if (cronEnabled) features.cron = true;
+
+    if (heartbeatEnabled) {
+      features.heartbeat = {
+        enabled: true,
+        intervalMin: Number.isFinite(hbInterval) ? hbInterval : 30,
+        ...(Number.isFinite(hbSkip) ? { skipRecentUserMin: hbSkip } : {}),
+      };
+    }
+
+    return Object.keys(features).length ? features : undefined;
+  })();
+
+  const mergedFeatures = config.features ?? featuresFromEnv;
 
   return [{
     name: agentName,
@@ -549,7 +577,7 @@ export function normalizeAgents(config: LettaBotConfig): AgentConfig[] {
     displayName: config.agent?.displayName,
     model,
     channels,
-    features: config.features,
+    features: mergedFeatures, 
     polling: config.polling,
     integrations: config.integrations,
   }];
