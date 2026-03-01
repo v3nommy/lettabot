@@ -17,6 +17,7 @@ import {
   buildErrorResponse, buildModelList, validateChatRequest,
 } from './openai-compat.js';
 import type { OpenAIChatRequest } from './openai-compat.js';
+import { handleFileExplorer } from './fileExplorer.js';
 
 import { createLogger } from '../logger.js';
 
@@ -482,6 +483,13 @@ export function createApiServer(deliverer: AgentRouter, options: ServerOptions):
         res.end(JSON.stringify(err.body));
       }
       return;
+    }
+
+     // Route: /admin/files/* (feature-flagged file explorer)
+    if (process.env.FILE_EXPLORER_ENABLED === 'true' && req.url?.startsWith('/admin/files')) {
+      const handled = await handleFileExplorer(req, res);
+      if (handled) return;
+      // if not handled, fall through to existing routing (including 404)
     }
 
     // Route: GET /portal - Admin portal for pairing approvals
